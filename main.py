@@ -10,12 +10,7 @@ app = FastAPI(title="Test Data Generator API")
 @app.get("/")
 async def root():
     return {
-        "message": "Test Data Generator API",
-        "endpoints": {
-            "/generate": "POST - Generate test data based on schema and rules",
-            "/health": "GET - Health check",
-            "/docs": "Swagger documentation"
-        }
+        "message": "Test Data Generator API"
     }
 
 
