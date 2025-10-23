@@ -9,7 +9,6 @@ app = FastAPI(title="Test Data Generator API")
 # API Endpoints
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
         "message": "Test Data Generator API",
         "endpoints": {
@@ -22,7 +21,6 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     try:
         # Test Ollama connection
         llm = OllamaLLM(model="llama3.2")

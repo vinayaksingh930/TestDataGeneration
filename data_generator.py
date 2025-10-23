@@ -37,7 +37,6 @@ class TestDataGenerator:
             # Generate data using Ollama
             response = self.llm.invoke(prompt)
             
-            # Parse JSON response
             # Clean the response to extract JSON
             json_match = re.search(r'\[.*\]', response, re.DOTALL)
             if json_match:
