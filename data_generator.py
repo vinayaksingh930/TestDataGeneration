@@ -1,22 +1,29 @@
+
 from langchain_ollama import OllamaLLM
 import json
 import re
 
+
 class TestDataGenerator:
     
-    def __init__(self, model_name: str = "qwen3-vl:235b-cloud"):
+    def __init__(self, model_name: str = "llama3:latest"):
         self.llm = OllamaLLM(model=model_name, temperature=0.7)
 
-    def _create_prompt(self, schema_fields: list, num_records: int, correct_num_records: int, wrong_num_records: int, additional_rules: str = None) -> str:
-        # print("Creating prompt with schema fields:", schema_fields)
-        # print("Number of records:", num_records)
-        # print("Number of correct records:", correct_num_records)
-        # print("Number of wrong records:", wrong_num_records)
-
+    def _create_prompt(
+        self, 
+        schema_fields: list, 
+        num_records: int, 
+        correct_num_records: int, 
+        wrong_num_records: int, 
+        additional_rules: str = None, 
+        parent_tables_data: dict = None
+    ) -> str:
+        
         field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
         valid_count = correct_num_records
         invalid_count = wrong_num_records
 
+        # Build field details with type, rules, and examples
         field_details = []
         for field in schema_fields:
             field_info = f"- {field.get('name', 'unknown')}: type={field.get('type', 'string')}"
@@ -25,6 +32,31 @@ class TestDataGenerator:
             if field.get('example'):
                 field_info += f", example={field.get('example')}"
             field_details.append(field_info)
+        
+        # Build parent tables context
+        parent_tables_context = ""
+        if parent_tables_data:
+            parent_tables_context = "\n                === PARENT TABLES DATA (USE THESE ACTUAL VALUES!) ===\n\n"
+            for parent_table_name, parent_rows in parent_tables_data.items():
+                parent_tables_context += f"                {parent_table_name.upper()} Table (already generated):\n"
+                # Show sample of parent data with all fields
+                sample_count = min(10, len(parent_rows))
+                for i, row in enumerate(parent_rows[:sample_count]):
+                    parent_tables_context += f"                  {row}\n"
+                if len(parent_rows) > sample_count:
+                    parent_tables_context += f"                  ... and {len(parent_rows) - sample_count} more records\n"
+                parent_tables_context += "\n"
+                
+                # Extract key values for easy reference
+                if parent_rows:
+                    # Get all field names from first row
+                    sample_row = parent_rows[0]
+                    for key in sample_row.keys():
+                        if key != "is_valid":
+                            values = [str(row.get(key, "")) for row in parent_rows if key in row]
+                            unique_values = list(set(values))[:20]  # Show up to 20 unique values
+                            parent_tables_context += f"                Available {parent_table_name}.{key} values: {', '.join(unique_values)}\n"
+                parent_tables_context += "\n"
 
         prompt = f"""You are an expert test data generator and validator. Your task is to generate {num_records} UNIQUE, DIVERSE, and REALISTIC test data records.
 
@@ -32,7 +64,7 @@ class TestDataGenerator:
                 {chr(10).join(field_details)}
 
                 {f"ADDITIONAL CONTEXT/RULES:\n{additional_rules}\n" if additional_rules else ""}
-
+                {parent_tables_context}
                 === CRITICAL INSTRUCTIONS ===
 
                 1. DATA DIVERSITY & UNIQUENESS:
@@ -40,6 +72,7 @@ class TestDataGenerator:
                 - All values must look realistic and natural.
                 - Never copy or reuse any example or previously generated value.
                 - Each valid and invalid record must differ clearly from the others.
+                {f"- **CRITICAL**: If parent table data is provided above, you MUST use those ACTUAL values (e.g., actual department names, actual IDs) to maintain referential integrity and logical consistency between tables." if parent_tables_data else ""}
 
                 2. RECORD COUNT:
                 - Generate EXACTLY {num_records} total records.
@@ -102,55 +135,106 @@ class TestDataGenerator:
         return prompt
 
     def _clean_json_response(self, response: str) -> str:
-        # Remove any double brackets ([[ ... ]])
+        # Remove double brackets
         response = re.sub(r'^\s*\[\s*\[', '[', response)
         response = re.sub(r'\]\s*\]\s*$', ']', response)
-        # Remove comments (// ... and /* ... */)
+        
+        # Remove comments
         response = re.sub(r'//.*', '', response)
         response = re.sub(r'/\*.*?\*/', '', response, flags=re.DOTALL)
+        
         # Remove trailing commas before closing bracket
         response = re.sub(r',(\s*\])', r'\1', response)
+        
         # Remove blank lines
-        response = '\n'.join([line for line in response.splitlines() if line.strip() != ''])
+        response = '\n'.join([line for line in response.splitlines() if line.strip()])
+        
+        # Remove lone 'null' tokens that appear as standalone entries inside objects
+        # e.g. { "a": 1, null, "b": 2 } -> { "a": 1, "b": 2 }
+        response = re.sub(r',\s*null\s*,', ',', response)
+        response = re.sub(r',\s*null\s*}', '}', response)
+        response = re.sub(r'{\s*null\s*,', '{', response)
+
+        # Collapse accidental multiple commas introduced by fixes
+        response = re.sub(r',\s*,+', ',', response)
+
         return response
 
-    def generate_data(self, schema_fields: list, num_records: int = 5, correct_num_records: int = 5, wrong_num_records: int = 0, additional_rules: str = None) -> dict:
+    def generate_data(
+        self, 
+        schema_fields: list, 
+        num_records: int = 5, 
+        correct_num_records: int = 5, 
+        wrong_num_records: int = 0, 
+        additional_rules: str = None, 
+        parent_tables_data: dict = None
+    ) -> dict:
         try:
             # Create prompt
-            prompt = self._create_prompt(schema_fields, num_records, correct_num_records, wrong_num_records, additional_rules)
+            prompt = self._create_prompt(
+                schema_fields, 
+                num_records, 
+                correct_num_records, 
+                wrong_num_records, 
+                additional_rules, 
+                parent_tables_data
+            )
 
-            print(f"\n=== PROMPT SENT TO LLM ===")
+            print(f"\n--- PROMPT SENT TO LLM ---")
             print(prompt)
-            print(f"=== END PROMPT ===\n")
-            
+            print(f"--- END PROMPT ---\n")
+
             # Generate data using Ollama
             response = self.llm.invoke(prompt)
-            
-            print(f"\n=== LLM RESPONSE ===")
+
+            print(f"\n--- LLM RESPONSE ---")
             print(response)
-            print(f"=== END RESPONSE ===\n")
-            
-            # Clean the response to extract JSON
+            print(f"--- END RESPONSE ---\n")
+
+            # Extract JSON from response
             json_match = re.search(r'\[.*\]', response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
             else:
+                # Try to fix incomplete response
                 json_str = response.strip()
-                # Add closing bracket if missing
                 if json_str.startswith('[') and not json_str.endswith(']'):
                     json_str += '\n]'
-                # Remove trailing comma before closing bracket
                 json_str = re.sub(r',(\s*\])', r'\1', json_str)
             
-            # Extra cleaning for comments/double brackets
+            # Clean JSON
             json_str = self._clean_json_response(json_str)
-            
-            print(f"\n=== CLEANED JSON ===")
+
+            print(f"\n--- CLEANED JSON ---")
             print(json_str)
-            print(f"=== END CLEANED JSON ===\n")
-            
-            generated_data = json.loads(json_str)
-            
+            print(f"--- END CLEANED JSON ---\n")
+
+            # Parse JSON (try a second repair pass if initial parse fails)
+            try:
+                generated_data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Attempt additional, aggressive fixes for common LLM formatting issues
+                repaired = json_str
+                # Replace single quotes with double quotes when safe (only for simple cases)
+                # but avoid changing common apostrophes by limiting to patterns of keys
+                repaired = re.sub(r"(?<=[{,\s])'([^']+?)'\s*:\s*", r'"\1": ', repaired)
+                # Ensure true/false/null are lowercase JSON literals (some LLMs use True/False/None)
+                repaired = re.sub(r"\bTrue\b", 'true', repaired)
+                repaired = re.sub(r"\bFalse\b", 'false', repaired)
+                repaired = re.sub(r"\bNone\b", 'null', repaired)
+                # Remove any remaining lone 'null' tokens
+                repaired = re.sub(r',\s*null\s*,', ',', repaired)
+                repaired = re.sub(r',\s*null\s*}', '}', repaired)
+                repaired = re.sub(r'{\s*null\s*,', '{', repaired)
+                repaired = re.sub(r',\s*,+', ',', repaired)
+
+                print("\n--- REPAIRED JSON ATTEMPT ---")
+                print(repaired)
+                print("--- END REPAIRED JSON ATTEMPT ---\n")
+
+                # Try parsing repaired JSON
+                generated_data = json.loads(repaired)
+
             # Ensure it's a list
             if not isinstance(generated_data, list):
                 generated_data = [generated_data]
@@ -161,6 +245,6 @@ class TestDataGenerator:
             }
             
         except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse generated data as JSON. LLM response might not be in correct format: {str(e)}")
+            raise Exception(f"Failed to parse JSON. LLM response format issue: {str(e)}")
         except Exception as e:
             raise Exception(f"Error generating data: {str(e)}")
