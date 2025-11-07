@@ -1,0 +1,53 @@
+.field-editor {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 4px;
+}
+
+.field-editor input,
+.field-editor select {
+    padding: 6px;
+    border-radius: 4px;
+    border: 1px solid #ccc
+}
+
+.fe-name {
+    width: 140px
+}
+
+.fe-type-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px
+}
+
+.fe-type {
+    min-width: 160px
+}
+
+.fe-choose {
+    padding: 6px 8px
+}
+
+.fe-rules {
+    width: 180px
+}
+
+.fe-example {
+    width: 160px
+}
+
+.fe-preview {
+    font-size: 13px;
+    color: #333
+}
+
+.fe-remove {
+    background: #ff4545;
+    color: #fff;
+    border: 0;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer
+}

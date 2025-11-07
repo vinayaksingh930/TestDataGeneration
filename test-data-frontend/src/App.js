@@ -11,6 +11,9 @@
 
 import React, { useState } from 'react';
 import './App.css';
+import TypeModal from './components/TypeModal';
+import allDataTypes from './data/allDataTypes';
+import FieldEditor from './components/FieldEditor';
 import * as XLSX from 'xlsx';
 
 function App() {
@@ -67,6 +70,37 @@ function App() {
         const updatedFields = [...fields];
         updatedFields[index][key] = value;
         setFields(updatedFields);
+    };
+
+    // Type modal for choosing rich datatypes (banking-focused)
+    const [showTypeModal, setShowTypeModal] = useState(false);
+    // typeModalTarget describes where to apply the chosen type. Example:
+    // { mode: 'single', index: 0 } or { mode: 'table', tableIndex: 0, fieldIndex: 1 }
+    const [typeModalTarget, setTypeModalTarget] = useState(null);
+
+    const openTypeModal = (target) => {
+        setTypeModalTarget(target);
+        setShowTypeModal(true);
+    };
+
+    const handleTypeSelect = (typeObj) => {
+        if (!typeModalTarget) return;
+        // Use defaultRule if available; otherwise fall back to description
+        const ruleToApply = typeObj.defaultRule || typeObj.description || '';
+        if (typeModalTarget.mode === 'single') {
+            const idx = typeModalTarget.index;
+            updateField(idx, 'type', typeObj.id || typeObj.name);
+            if (typeObj.example) updateField(idx, 'example', typeObj.example);
+            // always set rules to either defaultRule or description when selecting a type
+            updateField(idx, 'rules', ruleToApply);
+        } else if (typeModalTarget.mode === 'table') {
+            const { tableIndex, fieldIndex } = typeModalTarget;
+            updateFieldInTable(tableIndex, fieldIndex, 'type', typeObj.id || typeObj.name);
+            if (typeObj.example) updateFieldInTable(tableIndex, fieldIndex, 'example', typeObj.example);
+            updateFieldInTable(tableIndex, fieldIndex, 'rules', ruleToApply);
+        }
+        setShowTypeModal(false);
+        setTypeModalTarget(null);
     };
 
     // ========================================================================
@@ -210,7 +244,7 @@ function App() {
             let endpoint, body;
 
             if (mode === 'single') {
-                endpoint = 'http://localhost:8001/generate';
+                endpoint = 'http://localhost:8000/generate';
                 body = {
                     schema_fields: fields.filter(f => f.name),
                     num_records: parseInt(numRecords),
@@ -219,12 +253,12 @@ function App() {
                     additional_rules: additionalRules || undefined
                 };
             } else if (mode === 'natural') {
-                endpoint = 'http://localhost:8001/generate-from-text';
+                endpoint = 'http://localhost:8000/generate-from-text';
                 body = {
                     user_text: naturalLanguageText
                 };
             } else {
-                endpoint = 'http://localhost:8001/generate-db';
+                endpoint = 'http://localhost:8000/generate-db';
                 body = {
                     db_schema: {
                         db_name: dbName || 'my_database',
@@ -378,44 +412,13 @@ function App() {
                         <div className="form-section">
                             <h2>Schema Fields</h2>
                             {fields.map((field, index) => (
-                                <div key={index} className="field-row">
-                                    <input
-                                        type="text"
-                                        placeholder="Field Name"
-                                        value={field.name}
-                                        onChange={(e) => updateField(index, 'name', e.target.value)}
-                                        required
-                                    />
-                                    <select
-                                        value={field.type}
-                                        onChange={(e) => updateField(index, 'type', e.target.value)}
-                                    >
-                                        <option value="string">String</option>
-                                        <option value="integer">Integer</option>
-                                        <option value="float">Float</option>
-                                        <option value="boolean">Boolean</option>
-                                        <option value="email">Email</option>
-                                        <option value="phone">Phone</option>
-                                        <option value="date">Date</option>
-                                    </select>
-                                    <input
-                                        type="text"
-                                        placeholder="Rules (optional)"
-                                        value={field.rules}
-                                        onChange={(e) => updateField(index, 'rules', e.target.value)}
-                                    />
-                                    <input
-                                        type="text"
-                                        placeholder="Example (optional)"
-                                        value={field.example}
-                                        onChange={(e) => updateField(index, 'example', e.target.value)}
-                                    />
-                                    {fields.length > 1 && (
-                                        <button type="button" onClick={() => removeField(index)} className="remove-btn">
-                                            ✕
-                                        </button>
-                                    )}
-                                </div>
+                                <FieldEditor
+                                    key={index}
+                                    field={field}
+                                    onChange={(k, v) => updateField(index, k, v)}
+                                    onRemove={fields.length > 1 ? () => removeField(index) : null}
+                                    openTypeModal={() => openTypeModal({ mode: 'single', index })}
+                                />
                             ))}
                             <button type="button" onClick={addField} className="add-btn">
                                 + Add Field
@@ -589,18 +592,12 @@ function App() {
                                                 onChange={(e) => updateFieldInTable(tableIndex, fieldIndex, 'name', e.target.value)}
                                                 required
                                             />
-                                            <select
-                                                value={field.type}
-                                                onChange={(e) => updateFieldInTable(tableIndex, fieldIndex, 'type', e.target.value)}
-                                            >
-                                                <option value="string">String</option>
-                                                <option value="integer">Integer</option>
-                                                <option value="float">Float</option>
-                                                <option value="boolean">Boolean</option>
-                                                <option value="email">Email</option>
-                                                <option value="phone">Phone</option>
-                                                <option value="date">Date</option>
-                                            </select>
+                                            <FieldEditor
+                                                field={field}
+                                                onChange={(k, v) => updateFieldInTable(tableIndex, fieldIndex, k, v)}
+                                                onRemove={table.fields.length > 1 ? () => removeFieldFromTable(tableIndex, fieldIndex) : null}
+                                                openTypeModal={() => openTypeModal({ mode: 'table', tableIndex, fieldIndex })}
+                                            />
                                             <input
                                                 type="text"
                                                 placeholder="Rules"
@@ -791,6 +788,12 @@ function App() {
                     )}
                 </div>
             )}
+            <TypeModal
+                show={showTypeModal}
+                onClose={() => setShowTypeModal(false)}
+                types={allDataTypes}
+                onSelect={handleTypeSelect}
+            />
         </div>
     );
 }
