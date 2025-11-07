@@ -46,6 +46,12 @@ function App() {
 
     // Natural Language mode state
     const [naturalLanguageText, setNaturalLanguageText] = useState('');
+    // Selenium script mode state
+    const [seleniumScript, setSeleniumScript] = useState('');
+    const [seleniumNumRecords, setSeleniumNumRecords] = useState(5);
+    const [seleniumCorrectNumRecords, setSeleniumCorrectNumRecords] = useState(5);
+    const [seleniumWrongNumRecords, setSeleniumWrongNumRecords] = useState(0);
+    const [seleniumAdditionalRules, setSeleniumAdditionalRules] = useState('');
 
     // Common state
     const [response, setResponse] = useState(null);
@@ -257,6 +263,15 @@ function App() {
                 body = {
                     user_text: naturalLanguageText
                 };
+            } else if (mode === 'selenium') {
+                endpoint = 'http://localhost:8000/generate-from-selenium';
+                body = {
+                    selenium_script: seleniumScript,
+                    num_records: parseInt(seleniumNumRecords),
+                    correct_num_records: parseInt(seleniumCorrectNumRecords),
+                    wrong_num_records: parseInt(seleniumWrongNumRecords),
+                    additional_rules: seleniumAdditionalRules || undefined
+                };
             } else {
                 endpoint = 'http://localhost:8000/generate-db';
                 body = {
@@ -334,6 +349,12 @@ function App() {
                     onClick={() => setMode('natural')}
                 >
                     🤖 Natural Language
+                </button>
+                <button
+                    className={mode === 'selenium' ? 'active' : ''}
+                    onClick={() => setMode('selenium')}
+                >
+                    🧾 From Selenium
                 </button>
             </div>
 
@@ -467,6 +488,69 @@ function App() {
                                 <textarea
                                     value={additionalRules}
                                     onChange={(e) => setAdditionalRules(e.target.value)}
+                                    placeholder="Any additional context or rules..."
+                                    rows="3"
+                                />
+                            </label>
+                        </div>
+                    </>
+                ) : mode === 'selenium' ? (
+                    // SELENIUM MODE (paste-only)
+                    <>
+                        <div className="form-section">
+                            <h2>Paste Selenium Script</h2>
+                            <p className="help-text">Paste a Selenium script (Python/JS) that locates form inputs. The LLM will infer fields, rules, descriptions and examples from the script.</p>
+                            <textarea
+                                placeholder="Paste Selenium script here..."
+                                value={seleniumScript}
+                                onChange={(e) => setSeleniumScript(e.target.value)}
+                                rows={12}
+                                required
+                            />
+                        </div>
+
+                        <div className="form-section">
+                            <label>
+                                Total Number of Records:
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="100"
+                                    value={seleniumNumRecords}
+                                    onChange={(e) => setSeleniumNumRecords(e.target.value)}
+                                />
+                            </label>
+                        </div>
+                        <div className="form-section">
+                            <label>
+                                Number of Correct Records:
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max={seleniumNumRecords}
+                                    value={seleniumCorrectNumRecords}
+                                    onChange={(e) => setSeleniumCorrectNumRecords(e.target.value)}
+                                />
+                            </label>
+                        </div>
+                        <div className="form-section">
+                            <label>
+                                Number of Wrong Records:
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max={seleniumNumRecords}
+                                    value={seleniumWrongNumRecords}
+                                    onChange={(e) => setSeleniumWrongNumRecords(e.target.value)}
+                                />
+                            </label>
+                        </div>
+                        <div className="form-section">
+                            <label>
+                                Additional Rules (optional):
+                                <textarea
+                                    value={seleniumAdditionalRules}
+                                    onChange={(e) => setSeleniumAdditionalRules(e.target.value)}
                                     placeholder="Any additional context or rules..."
                                     rows="3"
                                 />
@@ -690,8 +774,14 @@ function App() {
 
             {response && (
                 <div className="response">
-                    {mode === 'single' ? (
+                    {(mode === 'single' || mode === 'selenium') ? (
                         <>
+                            {mode === 'selenium' && response.parsed_schema && (
+                                <div className="parsed-schema">
+                                    <h3>Parsed Schema</h3>
+                                    <pre>{JSON.stringify(response.parsed_schema, null, 2)}</pre>
+                                </div>
+                            )}
                             <h2>Generated Data ({response.count} records)</h2>
                             <div className="view-controls">
                                 <button

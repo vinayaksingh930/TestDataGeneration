@@ -18,6 +18,10 @@ The API will run on http://localhost:8000
 cd /Users/vinayak/Desktop/Watermelon/TestData/test-data-frontend
 npm start
 ```
+# use webdriver-manager to automatically install & use chromedriver
+```bash
+python frontend_analyzer.py --url 'https://leetcode.com/accounts/signup/?next=%2Fproblemset%2F' --chromedriver auto --output report.json
+```
 
 The frontend will run on http://localhost:3000
 
