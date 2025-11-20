@@ -190,6 +190,8 @@ async def generate_from_selenium(request: dict):
         correct_num_records = request.get("correct_num_records", num_records)
         wrong_num_records = request.get("wrong_num_records", 0)
         additional_rules = request.get("additional_rules")
+        # If client only wants parsing (no generation), set parse_only=True
+        parse_only = request.get("parse_only", False)
 
         if not script_text:
             raise HTTPException(status_code=400, detail="selenium_script is required and cannot be empty")
@@ -203,7 +205,17 @@ async def generate_from_selenium(request: dict):
             raise HTTPException(status_code=400, detail="No form fields could be parsed from the provided Selenium script")
         
         print(f"Parsed schema from Selenium script: {parsed_schema}")
-        # Now generate using the extracted schema
+        # If frontend requested parse-only, return parsed schema for review
+        if parse_only:
+            response_payload = {
+                "parsed_schema": parsed_schema
+            }
+            if parse_error:
+                response_payload["parse_error"] = parse_error
+            # Do not generate test data here — frontend will call /generate after user confirms
+            return response_payload
+
+        # Otherwise, proceed to generate using the extracted schema
         generator = TestDataGenerator()
         result = generator.generate_data(
             schema_fields=parsed_schema,

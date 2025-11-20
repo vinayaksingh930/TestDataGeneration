@@ -52,6 +52,13 @@ function App() {
     const [seleniumCorrectNumRecords, setSeleniumCorrectNumRecords] = useState(5);
     const [seleniumWrongNumRecords, setSeleniumWrongNumRecords] = useState(0);
     const [seleniumAdditionalRules, setSeleniumAdditionalRules] = useState('');
+    // Selenium parse-review-confirm flow
+    const [parsedSchema, setParsedSchema] = useState(null);
+    const [parsedFields, setParsedFields] = useState(null);
+    const [parsedNumRecords, setParsedNumRecords] = useState(5);
+    const [parsedCorrectNumRecords, setParsedCorrectNumRecords] = useState(5);
+    const [parsedWrongNumRecords, setParsedWrongNumRecords] = useState(0);
+    const [parsedAdditionalRules, setParsedAdditionalRules] = useState('');
 
     // Common state
     const [response, setResponse] = useState(null);
@@ -99,6 +106,15 @@ function App() {
             if (typeObj.example) updateField(idx, 'example', typeObj.example);
             // always set rules to either defaultRule or description when selecting a type
             updateField(idx, 'rules', ruleToApply);
+        } else if (typeModalTarget.mode === 'parsed') {
+            const idx = typeModalTarget.index;
+            if (!parsedFields) return;
+            const updated = [...parsedFields];
+            updated[idx] = updated[idx] || { name: '', type: 'string', rules: '', example: '' };
+            updated[idx].type = typeObj.id || typeObj.name;
+            if (typeObj.example) updated[idx].example = typeObj.example;
+            updated[idx].rules = ruleToApply;
+            setParsedFields(updated);
         } else if (typeModalTarget.mode === 'table') {
             const { tableIndex, fieldIndex } = typeModalTarget;
             updateFieldInTable(tableIndex, fieldIndex, 'type', typeObj.id || typeObj.name);
@@ -107,6 +123,105 @@ function App() {
         }
         setShowTypeModal(false);
         setTypeModalTarget(null);
+    };
+
+    // ==================== Selenium parse/confirm helpers ====================
+    const normalizeIncomingFields = (incoming) => {
+        if (!incoming || incoming.length === 0) return [{ name: '', type: 'string', rules: '', example: '' }];
+        return incoming.map(f => ({
+            name: f.name || f.field || '',
+            type: f.type || f.data_type || 'string',
+            rules: f.rules || f.description || '',
+            example: f.example || f.sample || ''
+        }));
+    };
+
+    const parseSelenium = async () => {
+        if (!seleniumScript) {
+            setError('Please paste a Selenium script to parse.');
+            return;
+        }
+        setLoading(true);
+        setError('');
+        setResponse(null);
+
+        try {
+            const res = await fetch('http://localhost:8000/generate-from-selenium', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selenium_script: seleniumScript, parse_only: true })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || `Error: ${res.status}`);
+            }
+
+            const data = await res.json();
+            // expect { parsed_schema: [...] }
+            if (data.parsed_schema) {
+                setParsedSchema(data.parsed_schema);
+                const normalized = normalizeIncomingFields(data.parsed_schema);
+                setParsedFields(normalized);
+                setParsedNumRecords(5);
+                setParsedCorrectNumRecords(5);
+                setParsedWrongNumRecords(0);
+                setParsedAdditionalRules('');
+            } else {
+                setError('Parser returned no schema');
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const updateParsedField = (index, key, value) => {
+        const updated = [...parsedFields];
+        updated[index][key] = value;
+        setParsedFields(updated);
+    };
+
+    const addParsedField = () => setParsedFields([...parsedFields, { name: '', type: 'string', rules: '', example: '' }]);
+    const removeParsedField = (index) => setParsedFields(parsedFields.filter((_, i) => i !== index));
+
+    const confirmGenerateFromParsed = async () => {
+        if (!parsedFields || parsedFields.every(f => !f.name)) {
+            setError('Please provide at least one field before generating.');
+            return;
+        }
+        setLoading(true);
+        setError('');
+        setResponse(null);
+        try {
+            const res = await fetch('http://localhost:8000/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    schema_fields: parsedFields.filter(f => f.name),
+                    num_records: parseInt(parsedNumRecords) || 0,
+                    correct_num_records: parseInt(parsedCorrectNumRecords) || 0,
+                    wrong_num_records: parseInt(parsedWrongNumRecords) || 0,
+                    additional_rules: parsedAdditionalRules || undefined
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || `Error: ${res.status}`);
+            }
+
+            const data = await res.json();
+            setResponse(data);
+            // clear parsed preview after generation
+            setParsedSchema(null);
+            setParsedFields(null);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     // ========================================================================
@@ -499,63 +614,91 @@ function App() {
                     <>
                         <div className="form-section">
                             <h2>Paste Selenium Script</h2>
-                            <p className="help-text">Paste a Selenium script (Python/JS) that locates form inputs. The LLM will infer fields, rules, descriptions and examples from the script.</p>
+                            <p className="help-text">Paste a Selenium script (Python/JS) that locates form inputs. Click "Parse Script" to extract a suggested schema you can review.</p>
                             <textarea
                                 placeholder="Paste Selenium script here..."
                                 value={seleniumScript}
                                 onChange={(e) => setSeleniumScript(e.target.value)}
                                 rows={12}
-                                required
                             />
+
+                            <div style={{ marginTop: 12 }}>
+                                <button type="button" onClick={parseSelenium} className="parse-btn" disabled={loading}>
+                                    {loading ? 'Parsing...' : 'Parse Script'}
+                                </button>
+                            </div>
                         </div>
 
-                        <div className="form-section">
-                            <label>
-                                Total Number of Records:
-                                <input
-                                    type="number"
-                                    min="1"
-                                    max="100"
-                                    value={seleniumNumRecords}
-                                    onChange={(e) => setSeleniumNumRecords(e.target.value)}
-                                />
-                            </label>
-                        </div>
-                        <div className="form-section">
-                            <label>
-                                Number of Correct Records:
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max={seleniumNumRecords}
-                                    value={seleniumCorrectNumRecords}
-                                    onChange={(e) => setSeleniumCorrectNumRecords(e.target.value)}
-                                />
-                            </label>
-                        </div>
-                        <div className="form-section">
-                            <label>
-                                Number of Wrong Records:
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max={seleniumNumRecords}
-                                    value={seleniumWrongNumRecords}
-                                    onChange={(e) => setSeleniumWrongNumRecords(e.target.value)}
-                                />
-                            </label>
-                        </div>
-                        <div className="form-section">
-                            <label>
-                                Additional Rules (optional):
-                                <textarea
-                                    value={seleniumAdditionalRules}
-                                    onChange={(e) => setSeleniumAdditionalRules(e.target.value)}
-                                    placeholder="Any additional context or rules..."
-                                    rows="3"
-                                />
-                            </label>
-                        </div>
+                        {/* If parsedFields exists, show editable preview (reuse FieldEditor) */}
+                        {parsedFields && (
+                            <div className="form-section parsed-schema-section">
+                                <h3>Parsed Schema (review & edit)</h3>
+                                {parsedFields.map((field, index) => (
+                                    <FieldEditor
+                                        key={index}
+                                        field={field}
+                                        onChange={(k, v) => updateParsedField(index, k, v)}
+                                        onRemove={parsedFields.length > 1 ? () => removeParsedField(index) : null}
+                                        openTypeModal={() => openTypeModal({ mode: 'parsed', index })}
+                                    />
+                                ))}
+                                <button type="button" onClick={addParsedField} className="add-btn">+ Add Field</button>
+
+                                <div className="form-section">
+                                    <label>
+                                        Total Number of Records:
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="100"
+                                            value={parsedNumRecords}
+                                            onChange={(e) => setParsedNumRecords(e.target.value)}
+                                        />
+                                    </label>
+                                </div>
+                                <div className="form-section">
+                                    <label>
+                                        Number of Correct Records:
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max={parsedNumRecords}
+                                            value={parsedCorrectNumRecords}
+                                            onChange={(e) => setParsedCorrectNumRecords(e.target.value)}
+                                        />
+                                    </label>
+                                </div>
+                                <div className="form-section">
+                                    <label>
+                                        Number of Wrong Records:
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max={parsedNumRecords}
+                                            value={parsedWrongNumRecords}
+                                            onChange={(e) => setParsedWrongNumRecords(e.target.value)}
+                                        />
+                                    </label>
+                                </div>
+                                <div className="form-section">
+                                    <label>
+                                        Additional Rules (optional):
+                                        <textarea
+                                            value={parsedAdditionalRules}
+                                            onChange={(e) => setParsedAdditionalRules(e.target.value)}
+                                            placeholder="Any additional context or rules..."
+                                            rows="3"
+                                        />
+                                    </label>
+                                </div>
+
+                                <div style={{ marginTop: 12 }}>
+                                    <button type="button" onClick={confirmGenerateFromParsed} className="submit-btn" disabled={loading}>
+                                        {loading ? 'Generating...' : 'Confirm & Generate Data'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </>
                 ) : (
                     // DATABASE MODE
@@ -760,9 +903,11 @@ function App() {
                     </>
                 )}
 
-                <button type="submit" disabled={loading} className="submit-btn">
-                    {loading ? 'Generating...' : `Generate ${mode === 'database' ? 'Database' : 'Data'}`}
-                </button>
+                {mode === 'selenium' ? null : (
+                    <button type="submit" disabled={loading} className="submit-btn">
+                        {loading ? 'Generating...' : `Generate ${mode === 'database' ? 'Database' : 'Data'}`}
+                    </button>
+                )}
             </form>
 
             {error && (
